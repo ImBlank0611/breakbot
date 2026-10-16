@@ -87,3 +87,11 @@ def test_reminder_bookkeeping():
     assert t.get_reminder(bid) == (555, 777, 0)
     t.finish_reminder(bid)
     assert t.get_reminder(bid)[2] == 1
+
+
+def test_announcements_only_once():
+    t = fresh()
+    assert not t.was_announced("v2")
+    t.mark_announced("v2")
+    t.mark_announced("v2")
+    assert t.was_announced("v2") and not t.was_announced("v3")

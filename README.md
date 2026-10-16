@@ -62,6 +62,11 @@ In Discord: **User Settings → Advanced → Developer Mode** on. Then:
    Without it, break history is wiped every time Railway redeploys.
 5. Deploy. The logs should say `Logged in as Break Tracker…`. Type `break` in the breakroom to test.
 
+### Update announcements
+Every update gets a post in the breakroom. To announce one, add an entry at the
+**top** of `UPDATES` in `changelog.py` (with a new unique `id`) and deploy.
+The bot posts it once when it starts up, and never reposts it on restarts.
+
 ### Notes
 - A break counts toward the day it **started** (a break from 11:50 PM to 12:10 AM counts for the earlier day).
 - Railway's Trial is a one-time $5 credit and the Free plan gives $1/month; a

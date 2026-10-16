@@ -15,6 +15,7 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+from changelog import UPDATES
 from tracker import BreakTracker, fmt
 
 # ── configuration (set these as Railway variables) ─────────────────────────
@@ -208,8 +209,29 @@ async def on_ready():
         await tree.sync(guild=guild)
     if not watch_breaks.is_running():
         watch_breaks.start()
+    await announce_updates()
     log.info("Logged in as %s — watching channel %s, limit %s min, tz %s",
              client.user, BREAK_CHANNEL_ID, LIMIT_MINUTES, TIMEZONE)
+
+
+async def announce_updates():
+    """Post any changelog entries the breakroom hasn't seen yet, oldest first."""
+    pending = [u for u in UPDATES if not tracker.was_announced(u["id"])]
+    if not pending:
+        return
+    ch = await break_channel()
+    if not ch:
+        return
+    for u in reversed(pending):
+        e = discord.Embed(title=u["title"], description=u["body"], color=BLUE)
+        e.set_footer(text="Break Bot update")
+        try:
+            await ch.send(embed=e, allowed_mentions=NO_PINGS)
+        except discord.HTTPException:
+            log.exception("Couldn't post update %s", u["id"])
+            return
+        tracker.mark_announced(u["id"])
+        log.info("Announced update %s", u["id"])
 
 
 @client.event

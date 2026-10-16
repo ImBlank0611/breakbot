@@ -73,6 +73,11 @@ class BreakTracker:
                 message_id INTEGER NOT NULL,
                 done       INTEGER NOT NULL DEFAULT 0
             )""")
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS announced (
+                update_id TEXT PRIMARY KEY,
+                ts        REAL NOT NULL
+            )""")
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_breaks_user_day "
             "ON breaks (guild_id, user_id, day)")
@@ -173,6 +178,16 @@ class BreakTracker:
 
     def finish_reminder(self, break_id: int):
         self.db.execute("UPDATE reminders SET done=1 WHERE break_id=?", (break_id,))
+        self.db.commit()
+
+    # ── update announcements ───────────────────────────────────────────────
+    def was_announced(self, update_id: str) -> bool:
+        return self.db.execute("SELECT 1 FROM announced WHERE update_id=?",
+                               (update_id,)).fetchone() is not None
+
+    def mark_announced(self, update_id: str):
+        self.db.execute("INSERT OR IGNORE INTO announced VALUES (?, ?)",
+                        (update_id, time.time()))
         self.db.commit()
 
     # ── reporting ──────────────────────────────────────────────────────────
