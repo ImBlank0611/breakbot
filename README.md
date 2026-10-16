@@ -1,1 +1,65 @@
-# breakbot
+# Breakroom Bot
+
+Everyone gets **30 minutes of break per day** (resets at midnight Manila time),
+usable in as many chunks as they want. Every break is announced in the breakroom.
+
+| Someone types | Bot posts |
+|---|---|
+| `break` | ☕ **Blank** went on break — Break left: **23:15** minutes |
+| `back` | ✅ **Blank** is back — This break: 06:45 · Break left: **16:30** minutes |
+| `back` (over 30 min) | Red message: **01:45 over** the limit + pings the manager role |
+
+If someone is **still on break** when their 30 minutes run out, the bot pings
+the managers right away (once per person per day) — they don't have to wait for
+the person to come back.
+
+`brb` / `I'm back` also work. Slash commands:
+
+- `/break`, `/back`: same as typing it
+- `/mybreak`: your time left (only you see it)
+- `/breaks`: who's out right now + everyone's usage today
+- `/endbreak @person` (managers): ends a break someone forgot to close
+- `/resetbreak @person` (managers): gives them a full 30 min again today
+
+"Managers" = anyone with the manager role or *Manage Server* permission.
+
+---
+
+## Setup (about 15 minutes)
+
+### 1. Create the bot in Discord
+1. Go to <https://discord.com/developers/applications> → **New Application** → name it (e.g. *Break Tracker*).
+2. **Bot** tab → **Reset Token** → copy the token somewhere safe (you'll paste it into Railway). Never post it in Discord.
+3. Same page, under *Privileged Gateway Intents*, turn on **Message Content Intent** → Save.
+4. **OAuth2 → URL Generator**: tick scopes `bot` and `applications.commands`; bot permissions
+   `View Channels`, `Send Messages`, `Embed Links`, `Read Message History`, `Mention @everyone, @here, and All Roles`.
+   Open the generated URL and add the bot to your **work** server.
+
+### 2. Get the IDs
+In Discord: **User Settings → Advanced → Developer Mode** on. Then:
+- Right-click the **breakroom channel** → *Copy Channel ID*
+- Server Settings → Roles → right-click the **manager role** → *Copy Role ID*
+
+### 3. Deploy on Railway
+1. Put these files in a new GitHub repo (github.com → New repository → *uploading an existing file* → drag everything in).
+2. <https://railway.com> → **New Project → Deploy from GitHub repo** → pick the repo.
+3. Service → **Variables** → add:
+
+   | Name | Value |
+   |---|---|
+   | `DISCORD_TOKEN` | the bot token from step 1 |
+   | `BREAK_CHANNEL_ID` | breakroom channel ID |
+   | `MANAGER_ROLE_ID` | manager role ID |
+   | `BREAK_LIMIT_MINUTES` | `30` (optional) |
+   | `TIMEZONE` | `Asia/Manila` (optional) |
+
+4. **Add a volume** (right-click the service → *Attach Volume*), mount path **`/data`**.
+   Without it, break history is wiped every time Railway redeploys.
+5. Deploy. The logs should say `Logged in as Break Tracker…`. Type `break` in the breakroom to test.
+
+### Notes
+- A break counts toward the day it **started** (a break from 11:50 PM to 12:10 AM counts for the earlier day).
+- Railway's Trial is a one-time $5 credit and the Free plan gives $1/month; a
+  small bot like this fits comfortably in **Hobby ($5/month)**. Check
+  <https://docs.railway.com/reference/pricing> for current numbers.
+- Run tests locally: `pip install pytest discord.py tzdata && pytest`
