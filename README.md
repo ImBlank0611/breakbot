@@ -9,6 +9,11 @@ usable in as many chunks as they want. Every break is announced in the breakroom
 | `back` | ✅ **Blank** is back — This break: 06:45 · Break left: **16:30** minutes |
 | `back` (over 30 min) | Red message: **01:45 over** the limit + pings the manager role |
 
+With **1 minute left**, the bot pings the person in the breakroom with a live
+countdown ("time's up in 59 seconds"). It flips to "✅ Back with 00:23 to spare"
+or "⏰ Time's up" when the break ends. Change the warning time with the
+`REMINDER_SECONDS` variable (default `60`, `0` turns it off).
+
 If someone is **still on break** when their 30 minutes run out, the bot pings
 the managers right away (once per person per day) — they don't have to wait for
 the person to come back.

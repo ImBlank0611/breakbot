@@ -66,6 +66,13 @@ class BreakTracker:
                 day      TEXT    NOT NULL,
                 PRIMARY KEY (guild_id, user_id, day)
             )""")
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS reminders (
+                break_id   INTEGER PRIMARY KEY,
+                channel_id INTEGER NOT NULL,
+                message_id INTEGER NOT NULL,
+                done       INTEGER NOT NULL DEFAULT 0
+            )""")
         self.db.execute(
             "CREATE INDEX IF NOT EXISTS idx_breaks_user_day "
             "ON breaks (guild_id, user_id, day)")
@@ -152,11 +159,27 @@ class BreakTracker:
                         (guild_id, user_id, day))
         self.db.commit()
 
+    # ── 1-minute reminder bookkeeping (one reminder message per break) ─────
+    def get_reminder(self, break_id: int):
+        """(channel_id, message_id, done) or None."""
+        return self.db.execute(
+            "SELECT channel_id, message_id, done FROM reminders WHERE break_id=?",
+            (break_id,)).fetchone()
+
+    def save_reminder(self, break_id: int, channel_id: int, message_id: int):
+        self.db.execute("INSERT OR REPLACE INTO reminders VALUES (?, ?, ?, 0)",
+                        (break_id, channel_id, message_id))
+        self.db.commit()
+
+    def finish_reminder(self, break_id: int):
+        self.db.execute("UPDATE reminders SET done=1 WHERE break_id=?", (break_id,))
+        self.db.commit()
+
     # ── reporting ──────────────────────────────────────────────────────────
     def open_breaks(self):
-        """All currently open breaks: (guild_id, user_id, day, start_ts)."""
+        """All currently open breaks: (break_id, guild_id, user_id, day, start_ts)."""
         return self.db.execute(
-            "SELECT guild_id, user_id, day, start_ts FROM breaks "
+            "SELECT id, guild_id, user_id, day, start_ts FROM breaks "
             "WHERE end_ts IS NULL").fetchall()
 
     def day_summary(self, guild_id: int, day: str | None = None,

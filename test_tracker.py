@@ -76,3 +76,14 @@ def test_users_are_independent():
     t.end_break(G, 1, ts(9, 5))
     assert len(t.open_breaks()) == 1
     assert t.used_seconds(G, 1, "2026-10-16") == 300
+
+
+def test_reminder_bookkeeping():
+    t = fresh()
+    t.start_break(G, U, ts(9))
+    bid = t.open_breaks()[0][0]
+    assert t.get_reminder(bid) is None
+    t.save_reminder(bid, 555, 777)
+    assert t.get_reminder(bid) == (555, 777, 0)
+    t.finish_reminder(bid)
+    assert t.get_reminder(bid)[2] == 1

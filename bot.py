@@ -24,11 +24,12 @@ MANAGER_ROLE_ID = int(os.environ.get("MANAGER_ROLE_ID", "0") or 0)
 LIMIT_MINUTES = int(os.environ.get("BREAK_LIMIT_MINUTES", "30"))
 TIMEZONE = os.environ.get("TIMEZONE", "Asia/Manila")
 DATA_DIR = os.environ.get("DATA_DIR", "/data")
+REMINDER_SECONDS = int(os.environ.get("REMINDER_SECONDS", "60"))  # 0 = off
 
 BREAK_WORDS = {"break", "brb", "on break", "going on break"}
 BACK_WORDS = {"back", "im back", "i'm back", "i’m back", "back from break"}
 
-YELLOW, GREEN, RED, BLUE = 0xF1C40F, 0x2ECC71, 0xE74C3C, 0x5865F2
+YELLOW, GREEN, RED, BLUE, ORANGE = 0xF1C40F, 0x2ECC71, 0xE74C3C, 0x5865F2, 0xE67E22
 
 logging.basicConfig(level=logging.INFO,
                     format="%(asctime)s %(levelname)s %(name)s: %(message)s")
@@ -133,6 +134,45 @@ async def alert_if_over(guild: discord.Guild, user_id: int, day: str,
                   allowed_mentions=PING_ALLOWED)
 
 
+# ── 1-minute reminder with a live countdown ────────────────────────────────
+PING_USER = discord.AllowedMentions(everyone=False, users=True, roles=False)
+
+
+async def send_reminder(guild: discord.Guild, break_id: int, user_id: int,
+                        remaining: float):
+    """Ping the person with a countdown. Discord's <t:…:R> timestamp ticks down
+    live on every screen, so the bot doesn't need to keep editing the message."""
+    ch = await break_channel()
+    if not ch:
+        return
+    ends_at = int(time.time() + remaining)
+    mins = max(1, round(REMINDER_SECONDS / 60))
+    e = discord.Embed(
+        description=f"⏰ **{mins} minute{'s' if mins != 1 else ''} of break left** — "
+                    f"time's up <t:{ends_at}:R> (<t:{ends_at}:T>)",
+        color=ORANGE)
+    e.set_footer(text="Type back when you return")
+    msg = await ch.send(content=f"<@{user_id}>", embed=e, allowed_mentions=PING_USER)
+    tracker.save_reminder(break_id, ch.id, msg.id)
+
+
+async def close_reminder(break_id: int, text: str, color: int):
+    """Swap the countdown for its final state (back in time / time's up)."""
+    rem = tracker.get_reminder(break_id)
+    if not rem or rem[2]:
+        return
+    tracker.finish_reminder(break_id)
+    channel_id, message_id, _ = rem
+    ch = client.get_channel(channel_id)
+    if ch is None:
+        return
+    try:
+        await ch.get_partial_message(message_id).edit(
+            embed=discord.Embed(description=text, color=color))
+    except discord.HTTPException:
+        log.warning("Couldn't edit reminder %s", message_id)
+
+
 # ── core actions (shared by text triggers and slash commands) ──────────────
 async def do_break(member: discord.Member):
     res = tracker.start_break(member.guild.id, member.id)
@@ -148,7 +188,12 @@ async def do_back(member: discord.Member):
     if not res.ok:
         return None, (f"You're not on break. "
                       f"Break left today: {left_text(res.remaining)}.")
-    day = active[1]
+    break_id, day = active[0], active[1]
+    await close_reminder(
+        break_id,
+        f"✅ Back with **{fmt(res.remaining)}** to spare" if not res.over
+        else f"⏰ Time's up — came back **{fmt(res.remaining)} over**",
+        GREEN if not res.over else RED)
     # Ping managers if they went over and nobody was pinged yet (e.g. bot was
     # restarting at the moment they crossed the limit).
     await alert_if_over(member.guild, member.id, day, still_on_break=False)
@@ -184,13 +229,25 @@ async def on_message(message: discord.Message):
         await message.channel.send(embed=embed, allowed_mentions=NO_PINGS)
 
 
-@tasks.loop(seconds=30)
+@tasks.loop(seconds=5)
 async def watch_breaks():
-    """Catch people who are still on break when they pass the limit."""
-    for guild_id, user_id, day, _start in tracker.open_breaks():
+    """Send the 1-minute reminder, flip it to "time's up", and ping managers
+    for anyone still on break past the limit."""
+    for break_id, guild_id, user_id, day, _start in tracker.open_breaks():
         guild = client.get_guild(guild_id)
-        if guild:
+        if not guild:
+            continue
+        remaining = tracker.limit - tracker.used_seconds(guild_id, user_id, day)
+        try:
+            if (REMINDER_SECONDS and 0 < remaining <= REMINDER_SECONDS
+                    and not tracker.get_reminder(break_id)):
+                await send_reminder(guild, break_id, user_id, remaining)
+            elif remaining <= 0:
+                await close_reminder(break_id, "⏰ **Time's up** — break is over",
+                                     RED)
             await alert_if_over(guild, user_id, day, still_on_break=True)
+        except discord.HTTPException:
+            log.exception("watch_breaks failed for user %s", user_id)
 
 
 # ── slash commands ─────────────────────────────────────────────────────────
