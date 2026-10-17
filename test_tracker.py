@@ -95,3 +95,24 @@ def test_announcements_only_once():
     t.mark_announced("v2")
     t.mark_announced("v2")
     assert t.was_announced("v2") and not t.was_announced("v3")
+
+
+def test_parse_clock_and_log_break():
+    t = fresh()
+    now = ts(20, 12)
+    assert t.parse_clock("7:32pm", now) == ts(19, 32)
+    assert t.parse_clock("7:32 PM", now) == ts(19, 32)
+    assert t.parse_clock("19:57", now) == ts(19, 57)
+    assert t.parse_clock("7pm", now) == ts(19, 0)
+    assert t.parse_clock("12:15am", now) == ts(0, 15)
+    for bad in ("9pm", "abc", "25:00", "13pm", "7:75"):
+        try:
+            t.parse_clock(bad, now); assert False, bad
+        except ValueError:
+            pass
+    r = t.log_break(G, U, ts(19, 32), ts(19, 57))
+    assert r.duration == 1500 and fmt(r.remaining) == "05:00" and r.breaks_today == 1
+    try:
+        t.log_break(G, U, ts(19, 57), ts(19, 32)); assert False
+    except ValueError:
+        pass

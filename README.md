@@ -21,9 +21,10 @@ the person to come back.
 `brb` / `I'm back` also work. Slash commands:
 
 - `/break`, `/back`: same as typing it
-- `/mybreak`: your time left (only you see it)
+- `/timeleft`: your time left, only you see it (does not start a break)
 - `/breaks`: who's out right now + everyone's usage today
 - `/endbreak @person` (managers): ends a break someone forgot to close
+- `/logbreak @person 7:32pm 7:57pm` (managers): adds a break someone forgot to record
 - `/resetbreak @person` (managers): gives them a full 30 min again today
 
 "Managers" = anyone with the manager role or *Manage Server* permission.

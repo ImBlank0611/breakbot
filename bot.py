@@ -187,8 +187,10 @@ async def do_back(member: discord.Member):
     active = tracker.active_break(member.guild.id, member.id)
     res = tracker.end_break(member.guild.id, member.id)
     if not res.ok:
-        return None, (f"You're not on break. "
-                      f"Break left today: {left_text(res.remaining)}.")
+        return None, (f"You're not on break, so there's nothing to end. "
+                      f"Break left today: {left_text(res.remaining)}.\n"
+                      f"-# If you forgot to type `break` when you left, ask a "
+                      f"manager to add it with `/logbreak`.")
     break_id, day = active[0], active[1]
     await close_reminder(
         break_id,
@@ -303,16 +305,21 @@ async def cmd_back(interaction: discord.Interaction):
     await post_public(interaction, embed)
 
 
-@tree.command(name="mybreak", description="How much break you have left today")
+@tree.command(name="timeleft",
+              description="Check how much break time you have left (does NOT start a break)")
 @app_commands.guild_only()
-async def cmd_mybreak(interaction: discord.Interaction):
+async def cmd_timeleft(interaction: discord.Interaction):
     g, u = interaction.guild_id, interaction.user.id
     active = tracker.active_break(g, u)
     day = active[1] if active else tracker.day_key()
     used = tracker.used_seconds(g, u, day)
-    state = (f"On break for {fmt(time.time() - active[2])}. " if active else "")
+    if active:
+        state = f"☕ You're **on break** — out for {fmt(time.time() - active[2])}."
+    else:
+        state = ("🟢 You're **not on break**. "
+                 "Type `break` or use `/break` to start one.")
     await interaction.response.send_message(
-        f"{state}Used today: {fmt(used)} · Break left: "
+        f"{state}\nUsed today: {fmt(used)} · Break left: "
         f"{left_text(tracker.limit - used)}", ephemeral=True)
 
 
@@ -356,6 +363,41 @@ async def cmd_endbreak(interaction: discord.Interaction, member: discord.Member)
             f"{member.display_name} isn't on break.", ephemeral=True)
     embed.set_author(name=f"Ended by {interaction.user.display_name}")
     await post_public(interaction, embed)
+
+
+@tree.command(name="logbreak",
+              description="(Managers) Add a break someone forgot to record")
+@app_commands.guild_only()
+@app_commands.describe(member="Who took the break",
+                       start="When it started, e.g. 7:32pm",
+                       end="When it ended, e.g. 7:57pm (leave empty for now)")
+async def cmd_logbreak(interaction: discord.Interaction, member: discord.Member,
+                       start: str, end: str | None = None):
+    if not is_manager(interaction.user):
+        return await interaction.response.send_message(
+            "Only managers can do that.", ephemeral=True)
+    if tracker.active_break(interaction.guild_id, member.id):
+        return await interaction.response.send_message(
+            f"{member.display_name} is on break right now — use `/endbreak` "
+            f"instead, or wait until they're back.", ephemeral=True)
+    try:
+        start_ts = tracker.parse_clock(start)
+        end_ts = tracker.parse_clock(end) if end else time.time()
+        res = tracker.log_break(interaction.guild_id, member.id, start_ts, end_ts)
+    except ValueError:
+        return await interaction.response.send_message(
+            "Couldn't read those times. Use something like `7:32pm` and `7:57pm` "
+            "(today, end after start, not in the future).", ephemeral=True)
+    span = (f"<t:{int(start_ts)}:t> – <t:{int(end_ts)}:t>")
+    e = discord.Embed(
+        description=f"📝 Break added for **{member.display_name}** · {span}",
+        color=RED if res.over else GREEN)
+    e.add_field(name="This break", value=fmt(res.duration))
+    e.add_field(name="Break left", value=left_text(res.remaining))
+    e.set_author(name=f"Added by {interaction.user.display_name}")
+    await post_public(interaction, e)
+    await alert_if_over(member.guild, member.id, tracker.day_key(start_ts),
+                        still_on_break=False)
 
 
 @tree.command(name="resetbreak",

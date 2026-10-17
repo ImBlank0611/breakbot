@@ -9,6 +9,18 @@ Each entry needs a unique `id` — use the date plus a short name.
 
 UPDATES = [
     {
+        "id": "2026-10-17-timeleft-logbreak",
+        "title": "🔧 Break Bot Update: clearer commands",
+        "body": (
+            "**`/mybreak` is now `/timeleft`.** It only *checks* your time — it "
+            "does **not** start a break.\n\n"
+            "**To start a break:** type `break` (or use `/break`)\n"
+            "**When you're back:** type `back` (or use `/back`)\n\n"
+            "Forgot to type `break` before leaving? Tell a manager. They can now "
+            "add a missed break with `/logbreak`, so your time stays accurate."
+        ),
+    },
+    {
         "id": "2026-10-17-one-minute-warning",
         "title": "⏰ Break Bot Update: 1-minute warning",
         "body": (

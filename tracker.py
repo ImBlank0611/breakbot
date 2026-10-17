@@ -141,6 +141,48 @@ class BreakTracker:
         return EndResult(ok=True, duration=now - start_ts, used=used,
                          remaining=self.limit - used, breaks_today=count)
 
+    def log_break(self, guild_id: int, user_id: int, start_ts: float,
+                  end_ts: float) -> EndResult:
+        """Record a finished break after the fact (e.g. someone forgot to type
+        `break`). Counts toward the day it started."""
+        if end_ts <= start_ts:
+            raise ValueError("end must be after start")
+        day = self.day_key(start_ts)
+        self.db.execute(
+            "INSERT INTO breaks (guild_id, user_id, day, start_ts, end_ts) "
+            "VALUES (?, ?, ?, ?, ?)", (guild_id, user_id, day, start_ts, end_ts))
+        self.db.commit()
+        used = self.used_seconds(guild_id, user_id, day)
+        count = self.db.execute(
+            "SELECT COUNT(*) FROM breaks WHERE guild_id=? AND user_id=? AND day=?",
+            (guild_id, user_id, day)).fetchone()[0]
+        return EndResult(ok=True, duration=end_ts - start_ts, used=used,
+                         remaining=self.limit - used, breaks_today=count)
+
+    def parse_clock(self, text: str, now: float | None = None) -> float:
+        """'7:32pm', '7:32 PM', '19:32' or '7pm' → timestamp today (local tz).
+        Raises ValueError if it can't be read or is in the future."""
+        now = time.time() if now is None else now
+        s = text.strip().lower().replace(" ", "").replace(".", "")
+        ampm = None
+        if s.endswith(("am", "pm")):
+            ampm, s = s[-2:], s[:-2]
+        h, _, m = s.partition(":")
+        if not h.isdigit() or (m and not m.isdigit()):
+            raise ValueError(text)
+        h, m = int(h), int(m or 0)
+        if ampm:
+            if not 1 <= h <= 12:
+                raise ValueError(text)
+            h = h % 12 + (12 if ampm == "pm" else 0)
+        if not (0 <= h <= 23 and 0 <= m <= 59):
+            raise ValueError(text)
+        today = datetime.fromtimestamp(now, self.tz)
+        ts = today.replace(hour=h, minute=m, second=0, microsecond=0).timestamp()
+        if ts > now + 60:
+            raise ValueError(f"{text} is in the future")
+        return ts
+
     def reset_user_day(self, guild_id: int, user_id: int, day: str | None = None):
         day = day or self.day_key()
         # Finished breaks are wiped; a break still in progress restarts from now.
