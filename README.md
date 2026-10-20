@@ -29,6 +29,21 @@ the person to come back.
 
 "Managers" = anyone with the manager role or *Manage Server* permission.
 
+### Day-off calendar
+
+At the start of every shift (**8 AM, 4 PM, 12 AM** Manila time) the bot posts
+who's off for the **next 7 days**, so a scheduled day-off appears a week ahead.
+
+- `/dayoff add @person oct 25` (QC): schedule a day-off. Optional `until:` for a
+  range (up to 31 days) and `note:` (VL, SL, holiday…). Dates can be typed as
+  `oct 25`, `10/25`, `2026-10-25`, `sat` or `tomorrow`.
+- `/dayoff remove @person oct 25` (QC): cancel it (also takes `until:`)
+- `/dayoff week`: the 7-day calendar, only you see it
+- `/dayoff list [@person]`: all upcoming day-offs, only you see it
+
+"QC" = anyone with the QC role (`QC_ROLE_ID`) or *Manage Server* permission.
+Day-offs are stored in the same database on the `/data` volume.
+
 ---
 
 ## Setup (about 15 minutes)
@@ -58,6 +73,9 @@ In Discord: **User Settings → Advanced → Developer Mode** on. Then:
    | `MANAGER_ROLE_ID` | manager role ID |
    | `BREAK_LIMIT_MINUTES` | `30` (optional) |
    | `TIMEZONE` | `Asia/Manila` (optional) |
+   | `QC_ROLE_ID` | QC role ID (optional, defaults to the current QC role) |
+   | `DAYOFF_CHANNEL_ID` | where the 7-day card posts (optional, defaults to the breakroom) |
+   | `DAYOFF_POST_TIMES` | `08:00,16:00,00:00` (optional, shift start times) |
 
 4. **Add a volume** (right-click the service → *Attach Volume*), mount path **`/data`**.
    Without it, break history is wiped every time Railway redeploys.

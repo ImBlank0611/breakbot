@@ -9,6 +9,20 @@ Each entry needs a unique `id` — use the date plus a short name.
 
 UPDATES = [
     {
+        "id": "2026-10-20-dayoff-calendar",
+        "title": "📅 Break Bot Update: day-off calendar",
+        "body": (
+            "The bot now keeps a **day-off calendar**. At the start of every "
+            "shift (**8 AM, 4 PM and 12 AM**) it posts who's off for the "
+            "**next 7 days**, so a scheduled day-off shows up a week ahead.\n\n"
+            "**QC:** schedule one with `/dayoff add` — e.g. "
+            "`/dayoff add @Ben oct 23 until: oct 24 note: VL`. "
+            "Cancel with `/dayoff remove`.\n"
+            "**Everyone:** `/dayoff week` shows the 7-day calendar and "
+            "`/dayoff list` shows upcoming day-offs (only you see these)."
+        ),
+    },
+    {
         "id": "2026-10-17-timeleft-logbreak",
         "title": "🔧 Break Bot Update: clearer commands",
         "body": (
