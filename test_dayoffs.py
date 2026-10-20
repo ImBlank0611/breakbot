@@ -81,3 +81,12 @@ def test_range_limits():
 def test_labels():
     assert date_label(date(2026, 10, 24)) == "Sat Oct 24"
     assert span_label(date(2026, 10, 23), date(2026, 10, 24)) == "Fri Oct 23 – Sat Oct 24"
+
+
+def test_calendar_image_renders():
+    from calendar_image import render
+    from datetime import timedelta
+    days = [TODAY + timedelta(days=i) for i in range(7)]
+    png = render(days, {days[3]: [("Ben", None), ("A very long display name", "SL")]},
+                 TODAY, "Day-offs")
+    assert png[:8] == b"\x89PNG\r\n\x1a\n"

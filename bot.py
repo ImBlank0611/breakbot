@@ -17,6 +17,9 @@ import discord
 from discord import app_commands
 from discord.ext import tasks
 
+import io
+
+from calendar_image import render as render_calendar
 from changelog import UPDATES
 from dayoffs import MAX_RANGE_DAYS, DayOffs, date_label, parse_date, span_label
 from tracker import BreakTracker, fmt
@@ -448,23 +451,53 @@ def is_qc(member: discord.abc.User) -> bool:
     return any(r.id == QC_ROLE_ID for r in member.roles)
 
 
-def dayoff_embed(guild_id: int, footer: str | None = None) -> discord.Embed:
-    """Rolling 7-day calendar starting today."""
+async def _member_name(guild: discord.Guild | None, uid: int) -> str:
+    if guild:
+        m = guild.get_member(uid)
+        if m is None:
+            try:
+                m = await guild.fetch_member(uid)
+            except discord.HTTPException:
+                m = None
+        if m:
+            return m.display_name
+    u = client.get_user(uid)
+    return u.display_name if u else f"User {uid}"
+
+
+async def dayoff_card_message(guild: discord.Guild | None, guild_id: int,
+                              footer: str | None = None):
+    """Rolling 7-day calendar starting today: (embed, image file).
+    The image is a real table; the text below it lists only days with
+    day-offs, so it still reads well on a small phone screen."""
     start = dayoffs.today()
-    end = start + timedelta(days=DAYOFF_DAYS_AHEAD - 1)
-    offs = dayoffs.between(guild_id, start, end)
+    days = [start + timedelta(days=i) for i in range(DAYOFF_DAYS_AHEAD)]
+    offs = dayoffs.between(guild_id, days[0], days[-1])
+
+    names = {}
+    for people in offs.values():
+        for uid, _ in people:
+            if uid not in names:
+                names[uid] = await _member_name(guild, uid)
+    table = {d: [(names[uid], note) for uid, note in people]
+             for d, people in offs.items()}
+    png = render_calendar(days, table, start,
+                          f"Day-offs · {date_label(days[0])} to {date_label(days[-1])}")
+
     lines = []
-    for i in range(DAYOFF_DAYS_AHEAD):
-        d = start + timedelta(days=i)
+    for i, d in enumerate(days):
+        if d not in offs:
+            continue
         tag = " · Today" if i == 0 else " · Tomorrow" if i == 1 else ""
-        people = offs.get(d, [])
         who = ", ".join(f"<@{uid}>" + (f" ({note})" if note else "")
-                        for uid, note in people) or "-# no one off"
-        lines.append(f"**{date_label(d)}**{tag}\n{who}")
+                        for uid, note in offs[d])
+        lines.append(f"**{date_label(d)}**{tag}: {who}")
     e = discord.Embed(title="📅 Day-offs · next 7 days",
-                      description="\n".join(lines), color=BLUE)
+                      description="\n".join(lines) or "No one is off this week.",
+                      color=BLUE)
+    e.set_image(url="attachment://dayoffs.png")
     e.set_footer(text=footer or "QC adds day-offs with /dayoff add")
-    return e
+    return e, discord.File(io.BytesIO(png), filename="dayoffs.png")
 
 
 async def dayoff_channel() -> discord.abc.Messageable | None:
@@ -495,9 +528,10 @@ async def dayoff_card():
     if tracker.was_announced(key):      # never double-post the same shift
         return
     try:
-        await ch.send(embed=dayoff_embed(ch.guild.id, f"{shift_label(slot)} · "
-                                         "QC adds day-offs with /dayoff add"),
-                      allowed_mentions=NO_PINGS)
+        em, file = await dayoff_card_message(
+            ch.guild, ch.guild.id,
+            f"{shift_label(slot)} · QC adds day-offs with /dayoff add")
+        await ch.send(embed=em, file=file, allowed_mentions=NO_PINGS)
         tracker.mark_announced(key)
     except discord.HTTPException:
         log.exception("Couldn't post day-off card")
@@ -588,8 +622,9 @@ async def dayoff_remove(interaction: discord.Interaction, member: discord.Member
 
 @dayoff_group.command(name="week", description="Who's off in the next 7 days")
 async def dayoff_week(interaction: discord.Interaction):
-    await interaction.response.send_message(
-        embed=dayoff_embed(interaction.guild_id), ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    em, file = await dayoff_card_message(interaction.guild, interaction.guild_id)
+    await interaction.followup.send(embed=em, file=file, ephemeral=True)
 
 
 @dayoff_group.command(name="post", description="(QC) Post the 7-day day-off card now")
@@ -601,15 +636,13 @@ async def dayoff_post(interaction: discord.Interaction):
     if not ch:
         return await interaction.response.send_message(
             "Couldn't reach the day-off channel.", ephemeral=True)
-    em = dayoff_embed(interaction.guild_id,
-                      f"Posted by {interaction.user.display_name} · "
-                      "QC adds day-offs with /dayoff add")
-    if interaction.channel_id == ch.id:
-        await interaction.response.send_message(embed=em, allowed_mentions=NO_PINGS)
-    else:
-        await ch.send(embed=em, allowed_mentions=NO_PINGS)
-        await interaction.response.send_message(
-            f"Posted in <#{ch.id}>.", ephemeral=True)
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    em, file = await dayoff_card_message(
+        interaction.guild, interaction.guild_id,
+        f"Posted by {interaction.user.display_name} · "
+        "QC adds day-offs with /dayoff add")
+    await ch.send(embed=em, file=file, allowed_mentions=NO_PINGS)
+    await interaction.followup.send(f"Posted in <#{ch.id}>.", ephemeral=True)
 
 
 @dayoff_group.command(name="list", description="Upcoming day-offs (everyone, or one person)")

@@ -32,7 +32,8 @@ the person to come back.
 ### Day-off calendar
 
 At the start of every shift (**8 AM, 4 PM, 12 AM** Manila time) the bot posts
-who's off for the **next 7 days**, so a scheduled day-off appears a week ahead.
+who's off for the **next 7 days** as a calendar table (an image, since Discord
+embeds can't show tables), so a scheduled day-off appears a week ahead.
 
 - `/dayoff add @person oct 25` (QC): schedule a day-off. Optional `until:` for a
   range (up to 31 days) and `note:` (VL, SL, holiday…). Dates can be typed as

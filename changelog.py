@@ -9,6 +9,15 @@ Each entry needs a unique `id` — use the date plus a short name.
 
 UPDATES = [
     {
+        "id": "2026-10-20-dayoff-table",
+        "title": "📅 Break Bot Update: day-off calendar table",
+        "body": (
+            "The day-off card is now a **calendar table** of the next 7 days, "
+            "with today highlighted and everyone who's off listed under their "
+            "day. Same times (8 AM, 4 PM, 12 AM), same commands."
+        ),
+    },
+    {
         "id": "2026-10-20-dayoff-post",
         "title": "📅 Break Bot Update: post the day-off card anytime",
         "body": (
