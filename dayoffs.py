@@ -81,26 +81,56 @@ def span_label(start: date, end: date) -> str:
 
 
 class DayOffs:
+    """Day-offs belong to a team. A team is the Discord channel the day-off was
+    scheduled in, so each channel has its own calendar."""
+
     def __init__(self, db: sqlite3.Connection, timezone: str = "Asia/Manila"):
         self.db = db
         self.tz = ZoneInfo(timezone)
-        self.db.execute("""
-            CREATE TABLE IF NOT EXISTS dayoffs (
-                guild_id  INTEGER NOT NULL,
-                user_id   INTEGER NOT NULL,
-                day       TEXT    NOT NULL,
-                note      TEXT,
-                added_by  INTEGER,
-                added_ts  REAL    NOT NULL,
-                PRIMARY KEY (guild_id, user_id, day)
-            )""")
         self.db.execute("""
             CREATE TABLE IF NOT EXISTS settings (
                 key   TEXT PRIMARY KEY,
                 value TEXT NOT NULL
             )""")
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS dayoff_entries (
+                guild_id  INTEGER NOT NULL,
+                team_id   INTEGER NOT NULL,
+                user_id   INTEGER NOT NULL,
+                day       TEXT    NOT NULL,
+                note      TEXT,
+                added_by  INTEGER,
+                added_ts  REAL    NOT NULL,
+                PRIMARY KEY (team_id, user_id, day)
+            )""")
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS dayoff_teams (
+                team_id   INTEGER PRIMARY KEY,
+                guild_id  INTEGER NOT NULL,
+                added_ts  REAL    NOT NULL
+            )""")
+        self._migrate_single_calendar()
         self.db.commit()
 
+    def _migrate_single_calendar(self):
+        """Older versions kept one calendar for the whole server. Move those
+        day-offs into the channel the calendar was being posted in."""
+        old = self.db.execute("SELECT name FROM sqlite_master WHERE type='table' "
+                              "AND name='dayoffs'").fetchone()
+        if not old:
+            return
+        team = int(self.get_setting("dayoff_channel_id") or 0)
+        if team:
+            for guild_id, user_id, day, note, added_by, added_ts in self.db.execute(
+                    "SELECT guild_id, user_id, day, note, added_by, added_ts "
+                    "FROM dayoffs").fetchall():
+                self.db.execute(
+                    "INSERT OR IGNORE INTO dayoff_entries VALUES (?, ?, ?, ?, ?, ?, ?)",
+                    (guild_id, team, user_id, day, note, added_by, added_ts))
+                self.add_team(guild_id, team, commit=False)
+        self.db.execute("DROP TABLE dayoffs")
+
+    # ── settings ───────────────────────────────────────────────────────────
     def get_setting(self, key: str) -> str | None:
         row = self.db.execute("SELECT value FROM settings WHERE key=?",
                               (key,)).fetchone()
@@ -110,6 +140,23 @@ class DayOffs:
         self.db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, value))
         self.db.commit()
 
+    # ── teams (channels that have a calendar) ──────────────────────────────
+    def add_team(self, guild_id: int, team_id: int, commit: bool = True):
+        self.db.execute("INSERT OR IGNORE INTO dayoff_teams VALUES (?, ?, ?)",
+                        (team_id, guild_id, time.time()))
+        if commit:
+            self.db.commit()
+
+    def teams(self) -> list[tuple[int, int]]:
+        """[(team_id, guild_id)] for every channel with a calendar."""
+        return self.db.execute(
+            "SELECT team_id, guild_id FROM dayoff_teams ORDER BY added_ts").fetchall()
+
+    def remove_team(self, team_id: int):
+        self.db.execute("DELETE FROM dayoff_teams WHERE team_id=?", (team_id,))
+        self.db.commit()
+
+    # ── day-offs ───────────────────────────────────────────────────────────
     def today(self, now: float | None = None) -> date:
         now = time.time() if now is None else now
         return datetime.fromtimestamp(now, self.tz).date()
@@ -123,50 +170,53 @@ class DayOffs:
             raise ValueError("range too long")
         return [start + timedelta(days=i) for i in range(n)]
 
-    def add(self, guild_id: int, user_id: int, start: date, end: date,
+    def add(self, guild_id: int, team_id: int, user_id: int, start: date, end: date,
             added_by: int | None = None, note: str | None = None) -> list[date]:
-        """Add day-offs; returns the dates that were newly added. Re-adding an
-        existing date just updates its note."""
+        """Add day-offs to a team's calendar; returns the dates that were newly
+        added. Re-adding an existing date just updates its note."""
         new = []
         for d in self._days(start, end):
             cur = self.db.execute(
-                "INSERT OR IGNORE INTO dayoffs VALUES (?, ?, ?, ?, ?, ?)",
-                (guild_id, user_id, d.isoformat(), note, added_by, time.time()))
+                "INSERT OR IGNORE INTO dayoff_entries VALUES (?, ?, ?, ?, ?, ?, ?)",
+                (guild_id, team_id, user_id, d.isoformat(), note, added_by, time.time()))
             if cur.rowcount:
                 new.append(d)
             elif note:
                 self.db.execute(
-                    "UPDATE dayoffs SET note=? WHERE guild_id=? AND user_id=? AND day=?",
-                    (note, guild_id, user_id, d.isoformat()))
+                    "UPDATE dayoff_entries SET note=? "
+                    "WHERE team_id=? AND user_id=? AND day=?",
+                    (note, team_id, user_id, d.isoformat()))
+        self.add_team(guild_id, team_id, commit=False)
         self.db.commit()
         return new
 
-    def remove(self, guild_id: int, user_id: int, start: date, end: date) -> list[date]:
+    def remove(self, team_id: int, user_id: int, start: date, end: date) -> list[date]:
         gone = []
         for d in self._days(start, end):
             cur = self.db.execute(
-                "DELETE FROM dayoffs WHERE guild_id=? AND user_id=? AND day=?",
-                (guild_id, user_id, d.isoformat()))
+                "DELETE FROM dayoff_entries WHERE team_id=? AND user_id=? AND day=?",
+                (team_id, user_id, d.isoformat()))
             if cur.rowcount:
                 gone.append(d)
         self.db.commit()
         return gone
 
-    def between(self, guild_id: int, start: date, end: date) -> dict[date, list[tuple[int, str | None]]]:
+    def between(self, team_id: int, start: date,
+                end: date) -> dict[date, list[tuple[int, str | None]]]:
         """{date: [(user_id, note), ...]} for every date in the range that has offs."""
         out: dict[date, list] = defaultdict(list)
         for uid, day, note in self.db.execute(
-                "SELECT user_id, day, note FROM dayoffs "
-                "WHERE guild_id=? AND day BETWEEN ? AND ? ORDER BY day, added_ts",
-                (guild_id, start.isoformat(), end.isoformat())):
+                "SELECT user_id, day, note FROM dayoff_entries "
+                "WHERE team_id=? AND day BETWEEN ? AND ? ORDER BY day, added_ts",
+                (team_id, start.isoformat(), end.isoformat())):
             out[date.fromisoformat(day)].append((uid, note))
         return dict(out)
 
-    def upcoming(self, guild_id: int, from_day: date, user_id: int | None = None,
+    def upcoming(self, team_id: int, from_day: date, user_id: int | None = None,
                  limit: int = 50) -> list[tuple[date, int, str | None]]:
         """[(date, user_id, note)] from `from_day` on, soonest first."""
-        q = "SELECT day, user_id, note FROM dayoffs WHERE guild_id=? AND day>=?"
-        args: list = [guild_id, from_day.isoformat()]
+        q = "SELECT day, user_id, note FROM dayoff_entries WHERE team_id=? AND day>=?"
+        args: list = [team_id, from_day.isoformat()]
         if user_id is not None:
             q += " AND user_id=?"
             args.append(user_id)
@@ -174,7 +224,7 @@ class DayOffs:
         args.append(limit)
         return [(date.fromisoformat(d), u, n) for d, u, n in self.db.execute(q, args)]
 
-    def is_off(self, guild_id: int, user_id: int, day: date) -> bool:
+    def is_off(self, team_id: int, user_id: int, day: date) -> bool:
         return self.db.execute(
-            "SELECT 1 FROM dayoffs WHERE guild_id=? AND user_id=? AND day=?",
-            (guild_id, user_id, day.isoformat())).fetchone() is not None
+            "SELECT 1 FROM dayoff_entries WHERE team_id=? AND user_id=? AND day=?",
+            (team_id, user_id, day.isoformat())).fetchone() is not None

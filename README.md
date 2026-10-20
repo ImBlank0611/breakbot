@@ -31,18 +31,23 @@ the person to come back.
 
 ### Day-off calendar
 
+**Every channel has its own team calendar.** A day-off scheduled in #4pm-chat
+only shows on #4pm-chat's table, not on any other channel's.
+
 At the start of every shift (**8 AM, 4 PM, 12 AM** Manila time) the bot posts
-who's off for the **next 7 days** as a calendar table (an image, since Discord
-embeds can't show tables), so a scheduled day-off appears a week ahead.
+each team's **next 7 days** in its channel as a calendar table image, so a
+scheduled day-off appears a week ahead.
+
+Run these in the team's channel:
 
 - `/dayoff add @person oct 25` (QC): schedule a day-off. Optional `until:` for a
   range (up to 31 days) and `note:` (VL, SL, holiday…). Dates can be typed as
-  `oct 25`, `10/25`, `2026-10-25`, `sat` or `tomorrow`.
+  `oct 25`, `10/25`, `2026-10-25`, `sat` or `tomorrow`. The confirmation is only
+  shown to you.
 - `/dayoff remove @person oct 25` (QC): cancel it (also takes `until:`)
-- `/dayoff post` (QC): post the 7-day table in the channel you run it in. The
-  shift cards then post in that channel too.
-- `/dayoff week`: the 7-day calendar, only you see it
-- `/dayoff list [@person]`: all upcoming day-offs, only you see it
+- `/dayoff post` (QC): post this channel's table now
+- `/dayoff week`: this channel's table, only you see it
+- `/dayoff list [@person]`: this channel's upcoming day-offs, only you see it
 
 "QC" = anyone with the QC role (`QC_ROLE_ID`) or *Manage Server* permission.
 Day-offs are stored in the same database on the `/data` volume.
@@ -77,7 +82,6 @@ In Discord: **User Settings → Advanced → Developer Mode** on. Then:
    | `BREAK_LIMIT_MINUTES` | `30` (optional) |
    | `TIMEZONE` | `Asia/Manila` (optional) |
    | `QC_ROLE_ID` | QC role ID (optional, defaults to the current QC role) |
-   | `DAYOFF_CHANNEL_ID` | where shift cards post until QC uses `/dayoff post` somewhere (optional, defaults to the breakroom) |
    | `DAYOFF_POST_TIMES` | `08:00,16:00,00:00` (optional, shift start times) |
 
 4. **Add a volume** (right-click the service → *Attach Volume*), mount path **`/data`**.

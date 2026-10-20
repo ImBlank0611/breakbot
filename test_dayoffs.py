@@ -43,39 +43,64 @@ def test_end_read_relative_to_start():
     assert parse_date("jan 2", start) == date(2027, 1, 2)
 
 
+T4, T8 = 400, 800      # two team channels
+
+
 def test_add_range_and_duplicates():
     d = fresh()
-    new = d.add(G, 5, date(2026, 10, 23), date(2026, 10, 24), added_by=9, note="VL")
+    new = d.add(G, T4, 5, date(2026, 10, 23), date(2026, 10, 24), added_by=9, note="VL")
     assert new == [date(2026, 10, 23), date(2026, 10, 24)]
-    assert d.add(G, 5, date(2026, 10, 24), date(2026, 10, 24)) == []
-    assert d.is_off(G, 5, date(2026, 10, 23))
+    assert d.add(G, T4, 5, date(2026, 10, 24), date(2026, 10, 24)) == []
+    assert d.is_off(T4, 5, date(2026, 10, 23))
+    assert d.teams() == [(T4, G)]
 
 
-def test_between_groups_by_day():
+def test_teams_are_separate():
     d = fresh()
-    d.add(G, 5, date(2026, 10, 23), date(2026, 10, 23))
-    d.add(G, 6, date(2026, 10, 23), date(2026, 10, 23), note="SL")
-    d.add(G, 7, date(2026, 11, 30), date(2026, 11, 30))     # outside window
-    d.add(2, 8, date(2026, 10, 23), date(2026, 10, 23))     # other server
-    got = d.between(G, date(2026, 10, 20), date(2026, 10, 26))
-    assert got == {date(2026, 10, 23): [(5, None), (6, "SL")]}
+    d.add(G, T4, 5, date(2026, 10, 23), date(2026, 10, 23))
+    d.add(G, T4, 6, date(2026, 10, 23), date(2026, 10, 23), note="SL")
+    d.add(G, T8, 7, date(2026, 10, 23), date(2026, 10, 23))
+    d.add(G, T4, 8, date(2026, 11, 30), date(2026, 11, 30))     # outside window
+    assert d.between(T4, date(2026, 10, 20), date(2026, 10, 26)) == \
+        {date(2026, 10, 23): [(5, None), (6, "SL")]}
+    assert d.between(T8, date(2026, 10, 20), date(2026, 10, 26)) == \
+        {date(2026, 10, 23): [(7, None)]}
+    assert sorted(d.teams()) == [(T4, G), (T8, G)]
+    assert d.remove(T8, 5, date(2026, 10, 23), date(2026, 10, 23)) == []  # not in T8
 
 
 def test_remove_and_upcoming():
     d = fresh()
-    d.add(G, 5, date(2026, 10, 19), date(2026, 10, 25))
-    gone = d.remove(G, 5, date(2026, 10, 21), date(2026, 10, 22))
+    d.add(G, T4, 5, date(2026, 10, 19), date(2026, 10, 25))
+    gone = d.remove(T4, 5, date(2026, 10, 21), date(2026, 10, 22))
     assert gone == [date(2026, 10, 21), date(2026, 10, 22)]
-    days = [r[0].day for r in d.upcoming(G, TODAY, user_id=5)]
+    days = [r[0].day for r in d.upcoming(T4, TODAY, user_id=5)]
     assert days == [20, 23, 24, 25]                          # past day 19 hidden
 
 
 def test_range_limits():
     d = fresh()
     with pytest.raises(ValueError):
-        d.add(G, 5, date(2026, 10, 25), date(2026, 10, 24))
+        d.add(G, T4, 5, date(2026, 10, 25), date(2026, 10, 24))
     with pytest.raises(ValueError):
-        d.add(G, 5, date(2026, 10, 1), date(2026, 12, 1))
+        d.add(G, T4, 5, date(2026, 10, 1), date(2026, 12, 1))
+
+
+def test_migrates_old_single_calendar():
+    db = sqlite3.connect(":memory:")
+    db.execute("CREATE TABLE settings (key TEXT PRIMARY KEY, value TEXT NOT NULL)")
+    db.execute("INSERT INTO settings VALUES ('dayoff_channel_id', '400')")
+    db.execute("""CREATE TABLE dayoffs (guild_id INTEGER, user_id INTEGER, day TEXT,
+                  note TEXT, added_by INTEGER, added_ts REAL,
+                  PRIMARY KEY (guild_id, user_id, day))""")
+    db.execute("INSERT INTO dayoffs VALUES (1, 5, '2026-10-23', 'VL', 9, 1.0)")
+    db.commit()
+    d = DayOffs(db)
+    assert d.between(T4, date(2026, 10, 20), date(2026, 10, 26)) == \
+        {date(2026, 10, 23): [(5, "VL")]}
+    assert d.teams() == [(T4, 1)]
+    DayOffs(db)                                              # second start is a no-op
+    assert d.teams() == [(T4, 1)]
 
 
 def test_labels():

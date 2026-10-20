@@ -35,7 +35,6 @@ REMINDER_SECONDS = int(os.environ.get("REMINDER_SECONDS", "60"))  # 0 = off
 
 # Day-off calendar
 QC_ROLE_ID = int(os.environ.get("QC_ROLE_ID", "1227825483492888676") or 0)
-DAYOFF_CHANNEL_ID = int(os.environ.get("DAYOFF_CHANNEL_ID", "0") or 0) or BREAK_CHANNEL_ID
 DAYOFF_POST_TIMES = os.environ.get("DAYOFF_POST_TIMES", "08:00,16:00,00:00")
 DAYOFF_DAYS_AHEAD = 7
 
@@ -497,15 +496,11 @@ async def _member_name(guild: discord.Guild | None, uid: int) -> str:
     return u.display_name if u else f"User {uid}"
 
 
-async def dayoff_card_message(guild: discord.Guild | None, guild_id: int,
-                              footer: str | None = None):
-    """Rolling 7-day calendar starting today: (embed, image file).
-    The image is a real table; the text below it lists only days with
-    day-offs, so it still reads well on a small phone screen."""
+async def dayoff_table(guild: discord.Guild | None, team_id: int) -> discord.File:
+    """The team's 7-day calendar (starting today) as a PNG table."""
     start = dayoffs.today()
     days = [start + timedelta(days=i) for i in range(DAYOFF_DAYS_AHEAD)]
-    offs = dayoffs.between(guild_id, days[0], days[-1])
-
+    offs = dayoffs.between(team_id, days[0], days[-1])
     names = {}
     for people in offs.values():
         for uid, _ in people:
@@ -515,43 +510,12 @@ async def dayoff_card_message(guild: discord.Guild | None, guild_id: int,
              for d, people in offs.items()}
     png = render_calendar(days, table, start,
                           f"Day-offs · {date_label(days[0])} to {date_label(days[-1])}")
-
-    lines = []
-    for i, d in enumerate(days):
-        if d not in offs:
-            continue
-        tag = " · Today" if i == 0 else " · Tomorrow" if i == 1 else ""
-        who = ", ".join(f"<@{uid}>" + (f" ({note})" if note else "")
-                        for uid, note in offs[d])
-        lines.append(f"**{date_label(d)}**{tag}: {who}")
-    e = discord.Embed(title="📅 Day-offs · next 7 days",
-                      description="\n".join(lines) or "No one is off this week.",
-                      color=BLUE)
-    e.set_image(url="attachment://dayoffs.png")
-    e.set_footer(text=footer or "QC adds day-offs with /dayoff add")
-    return e, discord.File(io.BytesIO(png), filename="dayoffs.png")
-
-
-async def dayoff_channel() -> discord.abc.Messageable | None:
-    """Where the shift cards go: the last channel QC used /dayoff post in,
-    otherwise DAYOFF_CHANNEL_ID (which defaults to the breakroom)."""
-    channel_id = int(dayoffs.get_setting("dayoff_channel_id") or DAYOFF_CHANNEL_ID)
-    ch = client.get_channel(channel_id)
-    if ch is None:
-        try:
-            ch = await client.fetch_channel(channel_id)
-        except discord.HTTPException:
-            log.error("Can't reach day-off channel %s", channel_id)
-            return None
-    return ch
+    return discord.File(io.BytesIO(png), filename="dayoffs.png")
 
 
 @tasks.loop(time=_post_times())
 async def dayoff_card():
-    """Post the 7-day calendar at the start of every shift."""
-    ch = await dayoff_channel()
-    if not ch or not getattr(ch, "guild", None):
-        return
+    """At the start of every shift, post each team's calendar in its channel."""
     now = discord.utils.utcnow().astimezone(ZoneInfo(TIMEZONE))
     mins = now.hour * 60 + now.minute
 
@@ -559,21 +523,31 @@ async def dayoff_card():
         d = abs(mins - (t.hour * 60 + t.minute))
         return min(d, 24 * 60 - d)
     slot = min(_post_times(), key=gap)
-    key = f"dayoff-card-{now:%Y-%m-%d}-{slot.hour:02d}{slot.minute:02d}"
-    if tracker.was_announced(key):      # never double-post the same shift
-        return
-    try:
-        em, file = await dayoff_card_message(
-            ch.guild, ch.guild.id,
-            f"{shift_label(slot)} · QC adds day-offs with /dayoff add")
-        await ch.send(embed=em, file=file, allowed_mentions=NO_PINGS)
-        tracker.mark_announced(key)
-    except discord.HTTPException:
-        log.exception("Couldn't post day-off card")
+    for team_id, guild_id in dayoffs.teams():
+        key = f"dayoff-card-{team_id}-{now:%Y-%m-%d}-{slot.hour:02d}{slot.minute:02d}"
+        if tracker.was_announced(key):      # never double-post the same shift
+            continue
+        ch = client.get_channel(team_id)
+        if ch is None:
+            try:
+                ch = await client.fetch_channel(team_id)
+            except discord.NotFound:
+                log.warning("Day-off channel %s is gone; dropping it", team_id)
+                dayoffs.remove_team(team_id)
+                continue
+            except discord.HTTPException:
+                log.exception("Can't reach day-off channel %s", team_id)
+                continue
+        try:
+            await ch.send(file=await dayoff_table(client.get_guild(guild_id), team_id))
+            tracker.mark_announced(key)
+        except discord.HTTPException:
+            log.exception("Couldn't post day-off table in %s", team_id)
 
 
-dayoff_group = app_commands.Group(name="dayoff", description="Day-off calendar",
-                                  guild_only=True)
+dayoff_group = app_commands.Group(
+    name="dayoff", description="Day-off calendar (each channel has its own)",
+    guild_only=True)
 
 DATE_HELP = ("Use something like `oct 25`, `10/25`, `2026-10-25`, `sat` or "
              "`tomorrow`.")
@@ -588,7 +562,8 @@ def _read_range(start: str, until: str | None):
     return s, e, today
 
 
-@dayoff_group.command(name="add", description="(QC) Schedule a day-off")
+@dayoff_group.command(name="add",
+                      description="(QC) Schedule a day-off on this channel's calendar")
 @app_commands.describe(member="Who's off",
                        date="First day off, e.g. oct 25, 10/25, sat",
                        until="Last day off, if it's more than one day",
@@ -611,25 +586,23 @@ async def dayoff_add(interaction: discord.Interaction, member: discord.Member,
             f"The last day has to be on or after the first, and at most "
             f"{MAX_RANGE_DAYS} days in one go.", ephemeral=True)
     note = (note or "").strip()[:40] or None
-    new = dayoffs.add(interaction.guild_id, member.id, s, e, interaction.user.id, note)
+    new = dayoffs.add(interaction.guild_id, interaction.channel_id, member.id,
+                      s, e, interaction.user.id, note)
     if not new:
         return await interaction.response.send_message(
-            f"{member.display_name} is already off on {span_label(s, e)}.",
+            f"{member.display_name} is already off on {span_label(s, e)} here.",
             ephemeral=True)
-    em = discord.Embed(
-        description=f"📅 Day-off scheduled for {member.mention} · "
-                    f"**{span_label(s, e)}**" + (f" ({note})" if note else ""),
-        color=GREEN)
-    em.set_author(name=f"Added by {interaction.user.display_name}")
-    if (s - today).days < DAYOFF_DAYS_AHEAD:
-        em.set_footer(text="Shows on the calendar starting with the next shift card")
-    else:
-        em.set_footer(text=f"Shows on the calendar from "
-                           f"{date_label(s - timedelta(days=DAYOFF_DAYS_AHEAD - 1))}")
-    await interaction.response.send_message(embed=em, allowed_mentions=NO_PINGS)
+    when = ("shows on the next shift table" if (s - today).days < DAYOFF_DAYS_AHEAD
+            else f"shows on the table from "
+                 f"{date_label(s - timedelta(days=DAYOFF_DAYS_AHEAD - 1))}")
+    await interaction.response.send_message(
+        f"✅ {member.display_name} is off **{span_label(s, e)}**"
+        + (f" ({note})" if note else "") + f" on this channel's calendar — {when}.",
+        ephemeral=True)
 
 
-@dayoff_group.command(name="remove", description="(QC) Cancel a scheduled day-off")
+@dayoff_group.command(name="remove",
+                      description="(QC) Cancel a day-off on this channel's calendar")
 @app_commands.describe(member="Whose day-off", date="The day to cancel",
                        until="Last day to cancel, for a range")
 async def dayoff_remove(interaction: discord.Interaction, member: discord.Member,
@@ -639,53 +612,49 @@ async def dayoff_remove(interaction: discord.Interaction, member: discord.Member
             "Only QC can change day-offs.", ephemeral=True)
     try:
         s, e, _ = _read_range(date, until)
-        gone = dayoffs.remove(interaction.guild_id, member.id, s, e)
+        gone = dayoffs.remove(interaction.channel_id, member.id, s, e)
     except ValueError:
         return await interaction.response.send_message(
             f"Couldn't read that date. {DATE_HELP}", ephemeral=True)
     if not gone:
         return await interaction.response.send_message(
-            f"{member.display_name} has no day-off on {span_label(s, e)}.",
-            ephemeral=True)
-    em = discord.Embed(
-        description=f"🗑️ Day-off cancelled for {member.mention} · "
-                    f"**{', '.join(date_label(d) for d in gone)}**",
-        color=ORANGE)
-    em.set_author(name=f"Removed by {interaction.user.display_name}")
-    await interaction.response.send_message(embed=em, allowed_mentions=NO_PINGS)
+            f"{member.display_name} has no day-off on {span_label(s, e)} "
+            f"on this channel's calendar.", ephemeral=True)
+    await interaction.response.send_message(
+        f"🗑️ Cancelled {member.display_name}'s day-off: "
+        f"**{', '.join(date_label(d) for d in gone)}**", ephemeral=True)
 
 
-@dayoff_group.command(name="week", description="Who's off in the next 7 days")
+@dayoff_group.command(name="week", description="This channel's next 7 days (only you see it)")
 async def dayoff_week(interaction: discord.Interaction):
     await interaction.response.defer(ephemeral=True, thinking=True)
-    em, file = await dayoff_card_message(interaction.guild, interaction.guild_id)
-    await interaction.followup.send(embed=em, file=file, ephemeral=True)
+    await interaction.followup.send(
+        file=await dayoff_table(interaction.guild, interaction.channel_id),
+        ephemeral=True)
 
 
 @dayoff_group.command(name="post",
-                      description="(QC) Post the 7-day day-off table in this channel")
+                      description="(QC) Post this channel's 7-day day-off table here")
 async def dayoff_post(interaction: discord.Interaction):
     if not is_qc(interaction.user):
         return await interaction.response.send_message(
-            "Only QC can post the day-off card.", ephemeral=True)
+            "Only QC can post the day-off table.", ephemeral=True)
     await interaction.response.defer(thinking=True)
-    em, file = await dayoff_card_message(
-        interaction.guild, interaction.guild_id,
-        f"Posted by {interaction.user.display_name} · "
-        "QC adds day-offs with /dayoff add")
-    await interaction.followup.send(embed=em, file=file, allowed_mentions=NO_PINGS)
-    # The shift cards (8 AM, 4 PM, 12 AM) follow to this channel from now on.
-    dayoffs.set_setting("dayoff_channel_id", str(interaction.channel_id))
+    # This channel gets its own table at every shift from now on.
+    dayoffs.add_team(interaction.guild_id, interaction.channel_id)
+    await interaction.followup.send(
+        file=await dayoff_table(interaction.guild, interaction.channel_id))
 
 
-@dayoff_group.command(name="list", description="Upcoming day-offs (everyone, or one person)")
+@dayoff_group.command(name="list",
+                      description="Upcoming day-offs on this channel's calendar")
 @app_commands.describe(member="Only show this person's day-offs")
 async def dayoff_list(interaction: discord.Interaction,
                       member: discord.Member | None = None):
-    rows = dayoffs.upcoming(interaction.guild_id, dayoffs.today(),
+    rows = dayoffs.upcoming(interaction.channel_id, dayoffs.today(),
                             member.id if member else None, limit=40)
     title = (f"📅 Upcoming day-offs · {member.display_name}" if member
-             else "📅 All upcoming day-offs")
+             else "📅 Upcoming day-offs on this channel")
     em = discord.Embed(title=title, color=BLUE)
     if not rows:
         em.description = "Nothing scheduled."
