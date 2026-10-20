@@ -592,6 +592,26 @@ async def dayoff_week(interaction: discord.Interaction):
         embed=dayoff_embed(interaction.guild_id), ephemeral=True)
 
 
+@dayoff_group.command(name="post", description="(QC) Post the 7-day day-off card now")
+async def dayoff_post(interaction: discord.Interaction):
+    if not is_qc(interaction.user):
+        return await interaction.response.send_message(
+            "Only QC can post the day-off card.", ephemeral=True)
+    ch = await dayoff_channel()
+    if not ch:
+        return await interaction.response.send_message(
+            "Couldn't reach the day-off channel.", ephemeral=True)
+    em = dayoff_embed(interaction.guild_id,
+                      f"Posted by {interaction.user.display_name} · "
+                      "QC adds day-offs with /dayoff add")
+    if interaction.channel_id == ch.id:
+        await interaction.response.send_message(embed=em, allowed_mentions=NO_PINGS)
+    else:
+        await ch.send(embed=em, allowed_mentions=NO_PINGS)
+        await interaction.response.send_message(
+            f"Posted in <#{ch.id}>.", ephemeral=True)
+
+
 @dayoff_group.command(name="list", description="Upcoming day-offs (everyone, or one person)")
 @app_commands.describe(member="Only show this person's day-offs")
 async def dayoff_list(interaction: discord.Interaction,

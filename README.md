@@ -38,6 +38,7 @@ who's off for the **next 7 days**, so a scheduled day-off appears a week ahead.
   range (up to 31 days) and `note:` (VL, SL, holiday…). Dates can be typed as
   `oct 25`, `10/25`, `2026-10-25`, `sat` or `tomorrow`.
 - `/dayoff remove @person oct 25` (QC): cancel it (also takes `until:`)
+- `/dayoff post` (QC): post the 7-day card in the channel right now
 - `/dayoff week`: the 7-day calendar, only you see it
 - `/dayoff list [@person]`: all upcoming day-offs, only you see it
 
