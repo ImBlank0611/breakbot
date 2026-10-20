@@ -94,6 +94,20 @@ class DayOffs:
                 added_ts  REAL    NOT NULL,
                 PRIMARY KEY (guild_id, user_id, day)
             )""")
+        self.db.execute("""
+            CREATE TABLE IF NOT EXISTS settings (
+                key   TEXT PRIMARY KEY,
+                value TEXT NOT NULL
+            )""")
+        self.db.commit()
+
+    def get_setting(self, key: str) -> str | None:
+        row = self.db.execute("SELECT value FROM settings WHERE key=?",
+                              (key,)).fetchone()
+        return row[0] if row else None
+
+    def set_setting(self, key: str, value: str):
+        self.db.execute("INSERT OR REPLACE INTO settings VALUES (?, ?)", (key, value))
         self.db.commit()
 
     def today(self, now: float | None = None) -> date:

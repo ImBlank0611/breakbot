@@ -39,7 +39,8 @@ embeds can't show tables), so a scheduled day-off appears a week ahead.
   range (up to 31 days) and `note:` (VL, SL, holiday…). Dates can be typed as
   `oct 25`, `10/25`, `2026-10-25`, `sat` or `tomorrow`.
 - `/dayoff remove @person oct 25` (QC): cancel it (also takes `until:`)
-- `/dayoff post` (QC): post the 7-day card in the channel right now
+- `/dayoff post` (QC): post the 7-day table in the channel you run it in. The
+  shift cards then post in that channel too.
 - `/dayoff week`: the 7-day calendar, only you see it
 - `/dayoff list [@person]`: all upcoming day-offs, only you see it
 
@@ -76,7 +77,7 @@ In Discord: **User Settings → Advanced → Developer Mode** on. Then:
    | `BREAK_LIMIT_MINUTES` | `30` (optional) |
    | `TIMEZONE` | `Asia/Manila` (optional) |
    | `QC_ROLE_ID` | QC role ID (optional, defaults to the current QC role) |
-   | `DAYOFF_CHANNEL_ID` | where the 7-day card posts (optional, defaults to the breakroom) |
+   | `DAYOFF_CHANNEL_ID` | where shift cards post until QC uses `/dayoff post` somewhere (optional, defaults to the breakroom) |
    | `DAYOFF_POST_TIMES` | `08:00,16:00,00:00` (optional, shift start times) |
 
 4. **Add a volume** (right-click the service → *Attach Volume*), mount path **`/data`**.

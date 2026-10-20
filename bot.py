@@ -226,9 +226,41 @@ async def on_ready():
         watch_breaks.start()
     if not dayoff_card.is_running():
         dayoff_card.start()
+    await remove_dayoff_update_posts()
     await announce_updates()
     log.info("Logged in as %s — watching channel %s, limit %s min, tz %s",
              client.user, BREAK_CHANNEL_ID, LIMIT_MINUTES, TIMEZONE)
+
+
+# Day-off update posts that were sent to the breakroom and are no longer wanted.
+REMOVED_UPDATE_TITLES = {
+    "📅 Break Bot Update: day-off calendar",
+    "📅 Break Bot Update: post the day-off card anytime",
+    "📅 Break Bot Update: day-off calendar table",
+}
+
+
+async def remove_dayoff_update_posts():
+    """One-time cleanup: delete the bot's own day-off update posts from the
+    breakroom, and mark those updates as done so they're never posted again."""
+    for uid in ("2026-10-20-dayoff-calendar", "2026-10-20-dayoff-post",
+                "2026-10-20-dayoff-table"):
+        tracker.mark_announced(uid)
+    if tracker.was_announced("cleanup-dayoff-update-posts"):
+        return
+    ch = await break_channel()
+    if not ch:
+        return
+    try:
+        async for msg in ch.history(limit=300):
+            if (msg.author.id == client.user.id and msg.embeds
+                    and msg.embeds[0].title in REMOVED_UPDATE_TITLES):
+                await msg.delete()
+                log.info("Deleted day-off update post %s", msg.id)
+    except discord.HTTPException:
+        log.exception("Couldn't clean up day-off update posts")
+        return
+    tracker.mark_announced("cleanup-dayoff-update-posts")
 
 
 async def announce_updates():
@@ -501,12 +533,15 @@ async def dayoff_card_message(guild: discord.Guild | None, guild_id: int,
 
 
 async def dayoff_channel() -> discord.abc.Messageable | None:
-    ch = client.get_channel(DAYOFF_CHANNEL_ID)
+    """Where the shift cards go: the last channel QC used /dayoff post in,
+    otherwise DAYOFF_CHANNEL_ID (which defaults to the breakroom)."""
+    channel_id = int(dayoffs.get_setting("dayoff_channel_id") or DAYOFF_CHANNEL_ID)
+    ch = client.get_channel(channel_id)
     if ch is None:
         try:
-            ch = await client.fetch_channel(DAYOFF_CHANNEL_ID)
+            ch = await client.fetch_channel(channel_id)
         except discord.HTTPException:
-            log.error("Can't reach day-off channel %s", DAYOFF_CHANNEL_ID)
+            log.error("Can't reach day-off channel %s", channel_id)
             return None
     return ch
 
@@ -627,22 +662,20 @@ async def dayoff_week(interaction: discord.Interaction):
     await interaction.followup.send(embed=em, file=file, ephemeral=True)
 
 
-@dayoff_group.command(name="post", description="(QC) Post the 7-day day-off card now")
+@dayoff_group.command(name="post",
+                      description="(QC) Post the 7-day day-off table in this channel")
 async def dayoff_post(interaction: discord.Interaction):
     if not is_qc(interaction.user):
         return await interaction.response.send_message(
             "Only QC can post the day-off card.", ephemeral=True)
-    ch = await dayoff_channel()
-    if not ch:
-        return await interaction.response.send_message(
-            "Couldn't reach the day-off channel.", ephemeral=True)
-    await interaction.response.defer(ephemeral=True, thinking=True)
+    await interaction.response.defer(thinking=True)
     em, file = await dayoff_card_message(
         interaction.guild, interaction.guild_id,
         f"Posted by {interaction.user.display_name} · "
         "QC adds day-offs with /dayoff add")
-    await ch.send(embed=em, file=file, allowed_mentions=NO_PINGS)
-    await interaction.followup.send(f"Posted in <#{ch.id}>.", ephemeral=True)
+    await interaction.followup.send(embed=em, file=file, allowed_mentions=NO_PINGS)
+    # The shift cards (8 AM, 4 PM, 12 AM) follow to this channel from now on.
+    dayoffs.set_setting("dayoff_channel_id", str(interaction.channel_id))
 
 
 @dayoff_group.command(name="list", description="Upcoming day-offs (everyone, or one person)")
