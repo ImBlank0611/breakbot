@@ -34,9 +34,10 @@ the person to come back.
 **Every channel has its own team calendar.** A day-off scheduled in #4pm-chat
 only shows on #4pm-chat's table, not on any other channel's.
 
-At the start of every shift (**8 AM, 4 PM, 12 AM** Manila time) the bot posts
-each team's **next 7 days** in its channel as a calendar table image, so a
-scheduled day-off appears a week ahead.
+Once a day at **12 AM** Manila time the bot posts each team's **next 7 days** in
+its channel as a calendar table image, so a scheduled day-off appears a week
+ahead. Each new table deletes the previous one, so the channel only ever has
+the current table.
 
 Run these in the team's channel:
 
@@ -45,7 +46,7 @@ Run these in the team's channel:
   `oct 25`, `10/25`, `2026-10-25`, `sat` or `tomorrow`. The confirmation is only
   shown to you.
 - `/dayoff remove @person oct 25` (QC): cancel it (also takes `until:`)
-- `/dayoff post` (QC): post this channel's table now
+- `/dayoff post` (QC): refresh this channel's table now (replaces the old one)
 - `/dayoff week`: this channel's table, only you see it
 - `/dayoff list [@person]`: this channel's upcoming day-offs, only you see it
 
@@ -82,7 +83,7 @@ In Discord: **User Settings → Advanced → Developer Mode** on. Then:
    | `BREAK_LIMIT_MINUTES` | `30` (optional) |
    | `TIMEZONE` | `Asia/Manila` (optional) |
    | `QC_ROLE_ID` | QC role ID (optional, defaults to the current QC role) |
-   | `DAYOFF_POST_TIMES` | `08:00,16:00,00:00` (optional, shift start times) |
+   | `DAYOFF_POST_TIME` | `00:00` (optional, when the daily table posts) |
 
 4. **Add a volume** (right-click the service → *Attach Volume*), mount path **`/data`**.
    Without it, break history is wiped every time Railway redeploys.

@@ -35,7 +35,7 @@ REMINDER_SECONDS = int(os.environ.get("REMINDER_SECONDS", "60"))  # 0 = off
 
 # Day-off calendar
 QC_ROLE_ID = int(os.environ.get("QC_ROLE_ID", "1227825483492888676") or 0)
-DAYOFF_POST_TIMES = os.environ.get("DAYOFF_POST_TIMES", "08:00,16:00,00:00")
+DAYOFF_POST_TIME = os.environ.get("DAYOFF_POST_TIME", "00:00")  # once a day
 DAYOFF_DAYS_AHEAD = 7
 
 BREAK_WORDS = {"break", "brb", "on break", "going on break"}
@@ -223,6 +223,7 @@ async def on_ready():
         await tree.sync(guild=guild)
     if not watch_breaks.is_running():
         watch_breaks.start()
+    await cleanup_old_tables()
     if not dayoff_card.is_running():
         dayoff_card.start()
     await remove_dayoff_update_posts()
@@ -460,18 +461,9 @@ async def cmd_resetbreak(interaction: discord.Interaction, member: discord.Membe
 
 
 # ── day-off calendar ───────────────────────────────────────────────────────
-def _post_times() -> list[dtime]:
-    tz = ZoneInfo(TIMEZONE)
-    out = []
-    for part in DAYOFF_POST_TIMES.split(","):
-        h, _, m = part.strip().partition(":")
-        out.append(dtime(int(h), int(m or 0), tzinfo=tz))
-    return out
-
-
-def shift_label(t: dtime) -> str:
-    h = t.hour % 12 or 12
-    return f"{h}{f':{t.minute:02d}' if t.minute else ''} {'AM' if t.hour < 12 else 'PM'} shift"
+def _post_time() -> dtime:
+    h, _, m = DAYOFF_POST_TIME.strip().partition(":")
+    return dtime(int(h), int(m or 0), tzinfo=ZoneInfo(TIMEZONE))
 
 
 def is_qc(member: discord.abc.User) -> bool:
@@ -513,33 +505,80 @@ async def dayoff_table(guild: discord.Guild | None, team_id: int) -> discord.Fil
     return discord.File(io.BytesIO(png), filename="dayoffs.png")
 
 
-@tasks.loop(time=_post_times())
-async def dayoff_card():
-    """At the start of every shift, post each team's calendar in its channel."""
-    now = discord.utils.utcnow().astimezone(ZoneInfo(TIMEZONE))
-    mins = now.hour * 60 + now.minute
-
-    def gap(t: dtime) -> int:
-        d = abs(mins - (t.hour * 60 + t.minute))
-        return min(d, 24 * 60 - d)
-    slot = min(_post_times(), key=gap)
-    for team_id, guild_id in dayoffs.teams():
-        key = f"dayoff-card-{team_id}-{now:%Y-%m-%d}-{slot.hour:02d}{slot.minute:02d}"
-        if tracker.was_announced(key):      # never double-post the same shift
-            continue
-        ch = client.get_channel(team_id)
-        if ch is None:
-            try:
-                ch = await client.fetch_channel(team_id)
-            except discord.NotFound:
-                log.warning("Day-off channel %s is gone; dropping it", team_id)
-                dayoffs.remove_team(team_id)
-                continue
-            except discord.HTTPException:
-                log.exception("Can't reach day-off channel %s", team_id)
-                continue
+async def _team_channel(team_id: int):
+    ch = client.get_channel(team_id)
+    if ch is None:
         try:
-            await ch.send(file=await dayoff_table(client.get_guild(guild_id), team_id))
+            ch = await client.fetch_channel(team_id)
+        except discord.NotFound:
+            log.warning("Day-off channel %s is gone; dropping it", team_id)
+            dayoffs.remove_team(team_id)
+            return None
+        except discord.HTTPException:
+            log.exception("Can't reach day-off channel %s", team_id)
+            return None
+    return ch
+
+
+def _is_table_post(msg: discord.Message) -> bool:
+    return (msg.author.id == client.user.id
+            and any(a.filename == "dayoffs.png" for a in msg.attachments))
+
+
+async def replace_table(ch, guild: discord.Guild | None, team_id: int):
+    """Post the team's table and delete the one posted before it, so the
+    channel only ever has the current table."""
+    msg = await ch.send(file=await dayoff_table(guild, team_id))
+    key = f"dayoff_msg_{team_id}"
+    old = dayoffs.get_setting(key)
+    dayoffs.set_setting(key, str(msg.id))
+    if old and int(old) != msg.id:
+        try:
+            await ch.get_partial_message(int(old)).delete()
+        except discord.NotFound:
+            pass
+        except discord.HTTPException:
+            log.warning("Couldn't delete old day-off table %s", old)
+
+
+async def cleanup_old_tables():
+    """One-time: remove the stack of earlier tables (from when it posted 3x a
+    day), keeping only the newest one in each team channel."""
+    if tracker.was_announced("cleanup-dayoff-tables-v1"):
+        return
+    for team_id, _guild_id in dayoffs.teams():
+        ch = await _team_channel(team_id)
+        if not ch:
+            continue
+        try:
+            newest = None
+            async for msg in ch.history(limit=300):          # newest first
+                if not _is_table_post(msg):
+                    continue
+                if newest is None:
+                    newest = msg
+                    dayoffs.set_setting(f"dayoff_msg_{team_id}", str(msg.id))
+                else:
+                    await msg.delete()
+        except discord.HTTPException:
+            log.exception("Couldn't clean up old tables in %s", team_id)
+            return
+    tracker.mark_announced("cleanup-dayoff-tables-v1")
+
+
+@tasks.loop(time=_post_time())
+async def dayoff_card():
+    """Once a day, post each team's fresh calendar (replacing yesterday's)."""
+    today = dayoffs.today()
+    for team_id, guild_id in dayoffs.teams():
+        key = f"dayoff-table-{team_id}-{today.isoformat()}"
+        if tracker.was_announced(key):      # never double-post the same day
+            continue
+        ch = await _team_channel(team_id)
+        if not ch:
+            continue
+        try:
+            await replace_table(ch, client.get_guild(guild_id), team_id)
             tracker.mark_announced(key)
         except discord.HTTPException:
             log.exception("Couldn't post day-off table in %s", team_id)
@@ -634,16 +673,16 @@ async def dayoff_week(interaction: discord.Interaction):
 
 
 @dayoff_group.command(name="post",
-                      description="(QC) Post this channel's 7-day day-off table here")
+                      description="(QC) Refresh this channel's day-off table now")
 async def dayoff_post(interaction: discord.Interaction):
     if not is_qc(interaction.user):
         return await interaction.response.send_message(
             "Only QC can post the day-off table.", ephemeral=True)
-    await interaction.response.defer(thinking=True)
-    # This channel gets its own table at every shift from now on.
+    await interaction.response.defer(ephemeral=True, thinking=True)
+    # This channel gets its own table every day from now on.
     dayoffs.add_team(interaction.guild_id, interaction.channel_id)
-    await interaction.followup.send(
-        file=await dayoff_table(interaction.guild, interaction.channel_id))
+    await replace_table(interaction.channel, interaction.guild, interaction.channel_id)
+    await interaction.followup.send("Table updated.", ephemeral=True)
 
 
 @dayoff_group.command(name="list",
