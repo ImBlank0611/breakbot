@@ -5,12 +5,12 @@ usable in as many chunks as they want. Every break is announced in the breakroom
 
 | Someone types | Bot posts |
 |---|---|
-| `break` | ☕ **Blank** went on break — Break left: **23:15** minutes |
-| `back` | ✅ **Blank** is back — This break: 06:45 · Break left: **16:30** minutes |
-| `back` (over 30 min) | Red message: **01:45 over** the limit + pings the manager role |
+| `break` | ☕ **Blank** went on break — Break left: **23m:15s** |
+| `back` | ✅ **Blank** is back — This break: 06m:45s · Break left: **16m:30s** |
+| `back` (over 30 min) | Red message: **01m:45s over** the limit + pings the manager role |
 
 With **1 minute left**, the bot pings the person in the breakroom with a live
-countdown ("time's up in 59 seconds"). It flips to "✅ Back with 00:23 to spare"
+countdown ("time's up in 59 seconds"). It flips to "✅ Back with 00m:23s to spare"
 or "⏰ Time's up" when the break ends. Change the warning time with the
 `REMINDER_SECONDS` variable (default `60`, `0` turns it off).
 

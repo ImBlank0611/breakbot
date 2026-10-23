@@ -89,8 +89,8 @@ def is_manager(member: discord.abc.User) -> bool:
 
 
 def left_text(remaining: float) -> str:
-    return (f"**{fmt(remaining)}** minutes" if remaining >= 0
-            else f"**00:00** — **{fmt(remaining)} over** the limit")
+    return (f"**{fmt(remaining)}**" if remaining >= 0
+            else f"**{fmt(0)}** — **{fmt(remaining)} over** the limit")
 
 
 def break_embed(member: discord.Member, remaining: float) -> discord.Embed:
@@ -109,7 +109,7 @@ def back_embed(member: discord.Member, res) -> discord.Embed:
     e.add_field(name="This break", value=fmt(res.duration))
     e.add_field(name="Break left", value=left_text(res.remaining))
     e.set_footer(text=f"Break #{res.breaks_today} today · "
-                      f"{fmt(res.used)} of {LIMIT_MINUTES}:00 used")
+                      f"{fmt(res.used)} of {fmt(tracker.limit)} used")
     return e
 
 
@@ -456,7 +456,7 @@ async def cmd_resetbreak(interaction: discord.Interaction, member: discord.Membe
             "Only managers can do that.", ephemeral=True)
     tracker.reset_user_day(interaction.guild_id, member.id)
     await interaction.response.send_message(
-        f"Reset — **{member.display_name}** has {LIMIT_MINUTES}:00 again today.",
+        f"Reset — **{member.display_name}** has {fmt(tracker.limit)} again today.",
         allowed_mentions=NO_PINGS)
 
 

@@ -259,6 +259,6 @@ class BreakTracker:
 
 
 def fmt(seconds: float) -> str:
-    """Seconds → 'MM:SS' (absolute value; caller decides on 'over')."""
+    """Seconds → '29m:11s' (absolute value; caller decides on 'over')."""
     s = int(round(abs(seconds)))
-    return f"{s // 60:02d}:{s % 60:02d}"
+    return f"{s // 60:02d}m:{s % 60:02d}s"

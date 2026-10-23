@@ -22,14 +22,14 @@ def test_chunks_add_up():
     assert (r.duration, r.remaining, r.breaks_today) == (600, 1200, 1)
     t.start_break(G, U, ts(12))
     r = t.end_break(G, U, ts(12, 15, 30))
-    assert r.remaining == 270 and fmt(r.remaining) == "04:30" and not r.over
+    assert r.remaining == 270 and fmt(r.remaining) == "04m:30s" and not r.over
 
 
 def test_over_limit():
     t = fresh()
     t.start_break(G, U, ts(9))
     r = t.end_break(G, U, ts(9, 34, 12))
-    assert r.over and fmt(r.remaining) == "04:12"
+    assert r.over and fmt(r.remaining) == "04m:12s"
 
 
 def test_double_break_and_back():
@@ -111,7 +111,7 @@ def test_parse_clock_and_log_break():
         except ValueError:
             pass
     r = t.log_break(G, U, ts(19, 32), ts(19, 57))
-    assert r.duration == 1500 and fmt(r.remaining) == "05:00" and r.breaks_today == 1
+    assert r.duration == 1500 and fmt(r.remaining) == "05m:00s" and r.breaks_today == 1
     try:
         t.log_break(G, U, ts(19, 57), ts(19, 32)); assert False
     except ValueError:
